@@ -1,8 +1,21 @@
 name: Send emails daily
+
+# 2026-11 修复：GitHub 的 schedule 调度对本仓库从 2026-10-09 起彻底不再触发
+# （先表现为触发时间越来越晚：8 月中旬晚 0.4h → 10 月初晚 4h，之后 0 次运行）。
+# 手动 workflow_dispatch 一直正常，说明代码/密钥/邮件配置都没有问题。
+#
+# 处理方式：
+#   1. cron 错开整点（整点是 GitHub 调度最拥挤的时刻），作为兜底保留；
+#   2. 主要触发改为外部定时器调用 workflow_dispatch，见 scripts/dispatch_daily.ps1。
+#      两者同时生效时可能重复发信，dispatch 脚本已做「当天已跑过就跳过」的判断。
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * *'
+    - cron: '17 22 * * *'   # UTC 22:17 = 北京时间 06:17
+
+concurrency:
+  group: send-emails-daily
+  cancel-in-progress: false
 
 jobs:
   calculate-and-send:
@@ -29,6 +42,8 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
-          echo "Use custom config: "
-          cat config/custom.yaml
+          echo "Config written to config/custom.yaml ($(wc -l < config/custom.yaml) lines)"
+          # 公开仓库的 Actions 日志任何人都能看到，这里把密钥类字段打码后再输出，
+          # 不要再用 cat 直接打印完整配置。
+          sed -E 's/((api_key|sender_password|key|user_id|sender|receiver):)[^#]*/\1 ***/g' config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py
